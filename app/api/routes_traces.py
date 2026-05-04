@@ -13,7 +13,7 @@ router = APIRouter(tags=["traces"])
 class ToolCallRecord(BaseModel):
     tool_name: str
     args: dict
-    result: dict | str | None
+    result: dict | str | None = None
 
 
 class TraceResponse(BaseModel):
@@ -25,11 +25,38 @@ class TraceResponse(BaseModel):
     latency_ms: int
 
 
+from fastapi import HTTPException
+from sqlalchemy import select
+from app.db.models import AgentTrace
+
+import json
+
 @router.get("/traces/{trace_id}", response_model=TraceResponse)
 async def get_trace(
     trace_id: str,
     db: AsyncSession = Depends(get_db),
 ) -> TraceResponse:
     """Return trace for one turn. 404 if not found."""
-    # TODO: query agent_traces table, return or 404
-    raise NotImplementedError
+    stmt = select(AgentTrace).where(AgentTrace.trace_id == trace_id)
+    result = await db.execute(stmt)
+    trace = result.scalar_one_or_none()
+    
+    if not trace:
+        raise HTTPException(status_code=404, detail="Trace not found")
+    
+    def ensure_list(val):
+        if isinstance(val, str):
+            try:
+                return json.loads(val)
+            except:
+                return []
+        return val if val is not None else []
+
+    return TraceResponse(
+        trace_id=trace.trace_id,
+        session_id=trace.session_id,
+        routed_to=trace.routed_to,
+        tool_calls=ensure_list(trace.tool_calls),
+        retrieved_chunk_ids=ensure_list(trace.retrieved_chunk_ids),
+        latency_ms=trace.latency_ms
+    )

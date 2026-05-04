@@ -1,52 +1,70 @@
 """
-Account tools — used by AccountAgent.
-
-These tools query the DB for user-specific data.
-Mock data is acceptable for the take-home; the integration matters.
-
-TODO for candidate: implement these tools.
+Account-specific lookup tools for the Helix Specialist Agents.
+Uses mock data structures to simulate internal database lookups.
 """
-from dataclasses import dataclass
-from datetime import datetime
+import uuid
+from datetime import datetime, timedelta
 
+# Mock database mapping user IDs to their account metadata.
+# This represents internal account/billing state.
+MOCK_ACCOUNTS = {
+    "u1": {
+        "plan_tier": "pro",
+        "concurrent_builds_used": 2,
+        "concurrent_builds_limit": 10,
+        "storage_used_gb": 45.2,
+        "storage_limit_gb": 100.0
+    },
+    "u2": {
+        "plan_tier": "free",
+        "concurrent_builds_used": 1,
+        "concurrent_builds_limit": 1,
+        "storage_used_gb": 0.5,
+        "storage_limit_gb": 5.0
+    }
+}
 
-@dataclass
-class BuildSummary:
-    build_id: str
-    pipeline: str
-    status: str  # passed | failed | cancelled
-    branch: str
-    started_at: datetime
-    duration_seconds: int
-
-
-@dataclass
-class AccountStatus:
-    user_id: str
-    plan_tier: str
-    concurrent_builds_used: int
-    concurrent_builds_limit: int
-    storage_used_gb: float
-    storage_limit_gb: float
-
-
-async def get_recent_builds(user_id: str, limit: int = 5) -> list[BuildSummary]:
+async def get_recent_builds(user_id: str, limit: int = 5) -> list[dict]:
     """
-    Return the most recent builds for a user, newest first.
-
-    For the take-home: returning mock/seeded data is fine.
-    The key evaluation point is that this is wired as an ADK tool
-    and the agent correctly invokes it when the user asks about builds.
+    Simulates a database query for a user's recent build history.
+    
+    Args:
+        user_id: The ID of the user whose builds are being requested.
+        limit: Maximum number of builds to return (default 5).
+        
+    Returns:
+        A list of dictionaries containing build status, ID, and timestamps.
     """
-    # TODO: implement — query DB or return mock data
-    raise NotImplementedError("Implement get_recent_builds()")
+    # Deterministic mock status generation based on the user_id hash
+    # (Ensures a consistent experience for specific test IDs)
+    status = "failed" if hash(user_id) % 2 == 0 else "passed"
+    
+    builds = [
+        {
+            "build_id": f"b-{uuid.uuid4().hex[:8]}",
+            "pipeline": "main-ci",
+            "status": status if i == 0 else "passed",
+            "branch": "feat/api-v2",
+            "started_at": (datetime.utcnow() - timedelta(hours=i)).isoformat(),
+            "duration_seconds": 120 + (i * 10)
+        }
+        for i in range(limit)
+    ]
+    return builds
 
-
-async def get_account_status(user_id: str) -> AccountStatus:
+async def get_account_status(user_id: str) -> dict:
     """
-    Return current account status (plan, usage limits).
-
-    For the take-home: mock data is fine.
+    Simulates a query to the billing/account management service.
+    
+    Returns:
+        Usage statistics, current plan tier, and resource limits.
     """
-    # TODO: implement
-    raise NotImplementedError("Implement get_account_status()")
+    # Lookup in mock dictionary, defaulting to 'unknown' if the user_id is not in MOCK_ACCOUNTS
+    account = MOCK_ACCOUNTS.get(user_id, {
+        "plan_tier": "unknown",
+        "concurrent_builds_used": 0,
+        "concurrent_builds_limit": 0,
+        "storage_used_gb": 0.0,
+        "storage_limit_gb": 0.0
+    })
+    return {"user_id": user_id, **account}

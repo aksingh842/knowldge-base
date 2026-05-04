@@ -51,24 +51,27 @@ async def client(db):
 def mock_adk(monkeypatch):
     """
     Patch the ADK pipeline so tests don't call the real LLM.
-
-    TODO for candidate: patch at the ADK boundary (not at the HTTP layer).
-    The mock should:
-    1. Accept a user message
-    2. Return a canned response with a specified routed_to value
-    3. Allow tests to assert which sub-agent was called
-
-    Example:
-        def mock_run(session_id, message, db):
-            if "rotate" in message.lower():
-                return PipelineResult(
-                    content="To rotate a deploy key...",
-                    routed_to="knowledge",
-                    trace_id="test-trace-001",
-                )
-            ...
-
-        monkeypatch.setattr("app.srop.pipeline.run", mock_run)
     """
-    # TODO: implement mock_adk fixture
-    pass
+    from app.srop.pipeline import PipelineResult
+
+    async def mock_run(session_id, user_message, db):
+        if "rotate" in user_message.lower():
+            return PipelineResult(
+                content="To rotate a deploy key, navigate to Settings...",
+                routed_to="knowledge",
+                trace_id="test-trace-001",
+            )
+        elif "plan" in user_message.lower():
+            # In a real scenario, we'd check the DB for the plan_tier
+            return PipelineResult(
+                content="Your plan tier is Pro.",
+                routed_to="account",
+                trace_id="test-trace-002",
+            )
+        return PipelineResult(
+            content="Hello!",
+            routed_to="smalltalk",
+            trace_id="test-trace-003",
+        )
+
+    monkeypatch.setattr("app.srop.pipeline.run", mock_run)

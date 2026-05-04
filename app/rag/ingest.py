@@ -1,60 +1,87 @@
 """
-RAG ingest CLI.
-
-Usage:
-    python -m app.rag.ingest --path docs/
-    python -m app.rag.ingest --path docs/ --chunk-size 512 --chunk-overlap 64
-
-Reads markdown files, chunks them, embeds, and writes to the vector store.
-
-TODO for candidate: implement chunking and embedding logic.
+RAG Ingestion CLI.
+Handles reading, chunking, and embedding markdown documentation into ChromaDB.
 """
 import argparse
 import asyncio
+import re
 from pathlib import Path
-
+import yaml
+from app.rag.vector_store import vector_store
 
 def chunk_markdown(text: str, chunk_size: int = 512, overlap: int = 64) -> list[str]:
     """
-    Split markdown text into overlapping chunks.
-
-    Design considerations:
-    - Simple character splitting is fast but breaks mid-sentence.
-    - Sentence-aware splitting is better for retrieval quality.
-    - Heading-aware splitting (split on ## / ###) keeps sections coherent.
-    - Overlap helps preserve context at chunk boundaries.
-
-    Choose an approach and document why in the README.
+    Split markdown text into overlapping chunks based on sentence boundaries.
+    
+    Args:
+        text: Raw markdown content.
+        chunk_size: Maximum characters per chunk.
+        overlap: Target overlap between adjacent chunks to maintain context.
+        
+    Returns:
+        A list of text snippets ready for embedding.
     """
-    # TODO: implement
-    raise NotImplementedError("Implement chunk_markdown()")
+    # Remove frontmatter if present to avoid indexing metadata as searchable text
+    if text.startswith("---"):
+        _, text = extract_metadata_and_body(text)
+    
+    # Split by sentence boundaries to preserve semantic meaning
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    chunks, current, current_len = [], [], 0
+    
+    for sentence in sentences:
+        # If adding the next sentence exceeds the size, close the current chunk
+        if current_len + len(sentence) > chunk_size and current:
+            chunks.append(" ".join(current))
+            # Basic overlap: keep the last 1-2 sentences for the next chunk
+            current = current[-2:] if len(current) > 2 else current[-1:]
+            current_len = sum(len(s) for s in current)
+        current.append(sentence)
+        current_len += len(sentence)
+        
+    # Append the final remaining piece
+    if current:
+        chunks.append(" ".join(current))
+    return chunks
 
+def extract_metadata_and_body(text: str) -> tuple[dict, str]:
+    """
+    Parses YAML frontmatter from the top of a markdown file.
+    
+    Returns:
+        A tuple of (metadata_dict, body_text).
+    """
+    match = re.match(r'^---\n(.*?)\n---\n', text, re.DOTALL)
+    if not match:
+        return {}, text
+    try:
+        metadata = yaml.safe_load(match.group(1))
+    except Exception:
+        # Fallback if YAML is malformed
+        metadata = {}
+    body = text[match.end():]
+    return metadata, body
 
 def extract_metadata(file_path: Path, text: str) -> dict:
     """
-    Extract metadata from a markdown file's frontmatter.
-
-    Expected frontmatter format:
-        ---
-        title: Deploy Keys
-        product_area: security
-        tags: [keys, secrets]
-        ---
-
-    Returns a dict suitable for vector store metadata filtering.
+    Processes frontmatter into a format compatible with ChromaDB.
+    ChromaDB metadata must be primitive types (str, int, float, bool).
     """
-    # TODO: implement
-    raise NotImplementedError("Implement extract_metadata()")
-
+    meta, _ = extract_metadata_and_body(text)
+    processed = {}
+    for k, v in meta.items():
+        if isinstance(v, list):
+            # Flatten lists into comma-separated strings
+            processed[k] = ", ".join(map(str, v))
+        elif isinstance(v, (str, int, float, bool)):
+            processed[k] = v
+        else:
+            processed[k] = str(v)
+    return processed
 
 async def ingest_directory(docs_path: Path, chunk_size: int, chunk_overlap: int) -> None:
     """
-    Walk docs_path, chunk and embed every .md file, upsert into vector store.
-
-    Design considerations:
-    - Generate a stable chunk_id (e.g. sha256(file + chunk_index)) for deduplication.
-    - Run embeddings in batches to avoid rate limiting.
-    - Print progress so the user can see what's happening.
+    Recursively scans a directory for markdown files and ingests them.
     """
     md_files = list(docs_path.rglob("*.md"))
     print(f"Found {len(md_files)} markdown files in {docs_path}")
@@ -64,20 +91,23 @@ async def ingest_directory(docs_path: Path, chunk_size: int, chunk_overlap: int)
         metadata = extract_metadata(file_path, text)
         chunks = chunk_markdown(text, chunk_size, chunk_overlap)
         print(f"  {file_path.name}: {len(chunks)} chunks")
-        # TODO: embed chunks and upsert to vector store
+        
+        # Batch upsert for efficiency
+        if chunks:
+            await vector_store.upsert_chunks(str(file_path), chunks, metadata)
 
     print("Ingest complete.")
 
-
 def main() -> None:
+    """CLI Entry point for documentation ingestion."""
     parser = argparse.ArgumentParser(description="Ingest docs into the vector store")
     parser.add_argument("--path", type=Path, required=True, help="Directory containing .md files")
     parser.add_argument("--chunk-size", type=int, default=512)
     parser.add_argument("--chunk-overlap", type=int, default=64)
     args = parser.parse_args()
 
+    # Run the async ingestion loop
     asyncio.run(ingest_directory(args.path, args.chunk_size, args.chunk_overlap))
-
 
 if __name__ == "__main__":
     main()
