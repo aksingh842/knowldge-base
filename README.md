@@ -9,7 +9,7 @@ A **Stateful RAG Orchestration Pipeline (SROP)** built with FastAPI and Google A
 ### 1. Local Setup
 ```bash
 # Clone and install dependencies
-git clone <your-repo>
+git clone https://github.com/aksingh842/knowldge-base/edit/main/README.md
 cd helix-srop-assignment
 pip install -e .
 
